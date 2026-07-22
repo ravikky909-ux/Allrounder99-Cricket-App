@@ -1,4 +1,4 @@
-name: Build Allrounder99 APK
+name: Build Allrounder99 Cricket v3 APK
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout files
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Java 17
@@ -23,30 +23,90 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK
+      - name: Install Android SDK packages
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-      - name: Extract project
+      - name: Extract 0.zip and locate project
+        shell: bash
         run: |
-          mkdir extracted
-          unzip 0.zip -d extracted
-          PROJECT_DIR=$(dirname "$(find extracted -name settings.gradle.kts | head -1)")
-          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+          set -euo pipefail
 
-      - name: Build APK
+          if [ ! -f "$GITHUB_WORKSPACE/0.zip" ]; then
+            echo "ERROR: Repository root me 0.zip nahi mila."
+            exit 1
+          fi
+
+          rm -rf "$GITHUB_WORKSPACE/extracted"
+          mkdir -p "$GITHUB_WORKSPACE/extracted"
+
+          unzip -q "$GITHUB_WORKSPACE/0.zip" \
+            -d "$GITHUB_WORKSPACE/extracted"
+
+          SETTINGS_FILE=$(find "$GITHUB_WORKSPACE/extracted" \
+            -type f -name "settings.gradle.kts" | head -n 1 || true)
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: 0.zip ke andar settings.gradle.kts nahi mila."
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Project directory: $PROJECT_DIR"
+
+      - name: Validate Cricket API secret
+        shell: bash
         env:
           CRICKET_API_KEY: ${{ secrets.CRICKET_API_KEY }}
         run: |
-          cd "$PROJECT_DIR"
-          gradle :app:assembleDebug --no-daemon
+          set -euo pipefail
 
-      - name: Upload APK
+          if [ -z "$CRICKET_API_KEY" ]; then
+            echo "ERROR: CRICKET_API_KEY repository secret add karo."
+            exit 1
+          fi
+
+      - name: Build installable APK
+        shell: bash
+        env:
+          CRICKET_API_KEY: ${{ secrets.CRICKET_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+      - name: Prepare APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK_FILE="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+
+          test -f "$APK_FILE"
+
+          mkdir -p "$GITHUB_WORKSPACE/output"
+
+          cp "$APK_FILE" \
+            "$GITHUB_WORKSPACE/output/Allrounder99-Cricket-v3.apk"
+
+          sha256sum \
+            "$GITHUB_WORKSPACE/output/Allrounder99-Cricket-v3.apk" \
+            > "$GITHUB_WORKSPACE/output/Allrounder99-Cricket-v3.apk.sha256"
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Allrounder99-Cricket-APK
-          path: extracted/**/app/build/outputs/apk/debug/*.apk
+          name: Allrounder99-Cricket-v3-APK
+          path: output/*
+          if-no-files-found: error
+          retention-days: 14
