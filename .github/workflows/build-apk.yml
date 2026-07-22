@@ -24,41 +24,55 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK packages
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-      - name: Extract 0.zip and locate project
+      - name: Extract project ZIP
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ ! -f "$GITHUB_WORKSPACE/0.zip" ]; then
-            echo "ERROR: Repository root me 0.zip nahi mila."
+          ZIP_FILE="$GITHUB_WORKSPACE/0-v3.1-API-Fix.zip"
+
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: Repository root me 0-v3.1-API-Fix.zip nahi mila."
+            echo "Repository me available files:"
+            find "$GITHUB_WORKSPACE" -maxdepth 2 -type f
             exit 1
           fi
 
           rm -rf "$GITHUB_WORKSPACE/extracted"
           mkdir -p "$GITHUB_WORKSPACE/extracted"
 
-          unzip -q "$GITHUB_WORKSPACE/0.zip" \
+          unzip -q "$ZIP_FILE" \
             -d "$GITHUB_WORKSPACE/extracted"
 
           SETTINGS_FILE=$(find "$GITHUB_WORKSPACE/extracted" \
-            -type f -name "settings.gradle.kts" | head -n 1 || true)
+            -type f \
+            \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
+            | head -n 1 || true)
 
           if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: 0.zip ke andar settings.gradle.kts nahi mila."
+            echo "ERROR: ZIP ke andar settings.gradle ya settings.gradle.kts nahi mila."
+            echo "ZIP ke extracted files:"
+            find "$GITHUB_WORKSPACE/extracted" -maxdepth 4 -type f
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$SETTINGS_FILE")
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Project directory: $PROJECT_DIR"
+          echo "Project directory found: $PROJECT_DIR"
 
       - name: Validate Cricket API secret
         shell: bash
@@ -67,10 +81,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "$CRICKET_API_KEY" ]; then
-            echo "ERROR: CRICKET_API_KEY repository secret add karo."
+          if [ -z "${CRICKET_API_KEY:-}" ]; then
+            echo "ERROR: GitHub repository secret CRICKET_API_KEY add nahi hua."
             exit 1
           fi
+
+          echo "Cricket API secret available."
 
       - name: Build installable APK
         shell: bash
@@ -81,32 +97,49 @@ jobs:
 
           cd "$PROJECT_DIR"
 
-          gradle :app:assembleDebug \
-            --no-daemon \
-            --stacktrace
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew :app:assembleDebug \
+              --no-daemon \
+              --stacktrace
+          else
+            gradle :app:assembleDebug \
+              --no-daemon \
+              --stacktrace
+          fi
 
-      - name: Prepare APK
+      - name: Locate and prepare APK
         shell: bash
         run: |
           set -euo pipefail
 
-          APK_FILE="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          APK_FILE=$(find "$PROJECT_DIR/app/build/outputs/apk" \
+            -type f \
+            -name "*.apk" \
+            | head -n 1 || true)
 
-          test -f "$APK_FILE"
+          if [ -z "$APK_FILE" ]; then
+            echo "ERROR: Build complete hua lekin APK file nahi mili."
+            find "$PROJECT_DIR/app/build" -maxdepth 6 -type f || true
+            exit 1
+          fi
 
           mkdir -p "$GITHUB_WORKSPACE/output"
 
           cp "$APK_FILE" \
-            "$GITHUB_WORKSPACE/output/Allrounder99-Cricket-v3.apk"
+            "$GITHUB_WORKSPACE/output/Allrounder99-Cricket-v3.1.apk"
 
           sha256sum \
-            "$GITHUB_WORKSPACE/output/Allrounder99-Cricket-v3.apk" \
-            > "$GITHUB_WORKSPACE/output/Allrounder99-Cricket-v3.apk.sha256"
+            "$GITHUB_WORKSPACE/output/Allrounder99-Cricket-v3.1.apk" \
+            > "$GITHUB_WORKSPACE/output/Allrounder99-Cricket-v3.1.apk.sha256"
+
+          echo "APK ready:"
+          ls -lh "$GITHUB_WORKSPACE/output"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Allrounder99-Cricket-v3-APK
+          name: Allrounder99-Cricket-v3.1-APK
           path: output/*
           if-no-files-found: error
           retention-days: 14
